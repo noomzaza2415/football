@@ -5,9 +5,10 @@ import TotalGoalsChart from "@/components/charts/TotalGoalsChart";
 import { DisclaimerBanner } from "@/components/Disclaimer";
 import ExpectedGoalsPanel from "@/components/ExpectedGoalsPanel";
 import MarketComparison from "@/components/MarketComparison";
+import NewsPanel from "@/components/NewsPanel";
 import OverUnderTable from "@/components/OverUnderTable";
 import { BackLink, Badge, BackendDownState, Panel, PageHeading } from "@/components/ui";
-import { api, ApiError } from "@/lib/api";
+import { api, ApiError, tryRequest } from "@/lib/api";
 import { formatKickoff, leanStyles, percent } from "@/lib/format";
 import type { Lean } from "@/lib/types";
 
@@ -37,6 +38,8 @@ export default async function MatchPage({
     }
     throw error;
   }
+
+  const news = await tryRequest(api.newsForMatch(matchId, 6));
 
   const { match } = prediction;
   const line25 = prediction.lines.find((entry) => entry.line === 2.5);
@@ -105,6 +108,13 @@ export default async function MatchPage({
           <MarketComparison items={prediction.market_comparison} />
         </Panel>
       </div>
+
+      <NewsPanel
+        feed={news}
+        title="ข่าวเกี่ยวกับสองทีมนี้"
+        description="พาดหัวจาก RSS ที่กล่าวถึงทีมใดทีมหนึ่งในคู่นี้"
+        emptyMessage="ยังไม่พบข่าวที่กล่าวถึงสองทีมนี้"
+      />
 
       <Panel
         title="สกอร์ที่เป็นไปได้มากที่สุด"

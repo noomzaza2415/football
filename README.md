@@ -104,6 +104,8 @@ hardcoded and `.env` is gitignored.
 | `MODEL_LAST_N_MATCHES` | Form window per team, 20 by default |
 | `MODEL_RHO` | Dixon-Coles low-score correction, `0` disables it |
 | `MODEL_SHRINKAGE` | `auto`, `off`, or a constant in matches. Leave on `auto` |
+| `GOOGLE_SERVICE_ACCOUNT_FILE` | Optional. Service account JSON key for the Sheets export |
+| `GOOGLE_SHEET_ID` | Optional. The id from the spreadsheet URL |
 | `MODEL_LINES` | Lines to compute, `1.5,2.5,3.5` by default |
 | `CORS_ORIGINS` | Where the frontend is served from |
 
@@ -258,12 +260,18 @@ usually the model being wrong.
 | `GET` | `/api/teams/{id}` | One team |
 | `GET` | `/api/teams/{id}/stats` | Aggregates and fitted strengths |
 | `POST` | `/api/teams/rebuild-stats` | Recompute `team_stats` from `matches` |
+| `GET` | `/api/matches/day` | One matchday. Omit `day` for the nearest one |
+| `GET` | `/api/matches/calendar` | Which days have matches, for the date picker |
+| `GET` | `/api/matches/range` | Matches between two dates, up to 60 days |
 | `GET` | `/api/matches/upcoming` | Scheduled matches with a short model summary |
 | `GET` | `/api/matches/{id}` | One match |
 | `GET` | `/api/matches/{id}/prediction` | Full analysis and market comparison |
 | `POST` | `/api/matches/{id}/refresh-prediction` | Re-run the model and store it |
 | `GET` | `/api/predictions/history` | Stored predictions scored against results |
 | `GET` | `/api/predictions/backtest` | Walk-forward backtest against four baselines |
+| `GET` | `/api/news` | Headlines from public RSS feeds, Thai and international |
+| `GET` | `/api/news/match/{id}` | Headlines naming either side of one fixture |
+| `GET` | `/api/export/{table}.csv` | matches, predictions, backtest or team_stats as CSV |
 
 `GET /api/matches/{id}/prediction?point_in_time=true` refits using only matches
 that finished before kick-off, which is what makes a backtest honest.
@@ -298,9 +306,48 @@ an append-only log, which is what lets the performance page score old runs.
 
 | Route | Contents |
 | --- | --- |
-| `/` | Upcoming fixtures as cards with expected goals and the Over/Under split |
-| `/matches/[id]` | Expected goals, total-goals distribution chart, line table, market comparison, likely scorelines |
-| `/performance` | Hit rate over time, calibration, and every scored prediction |
+| `/` | One matchday: every fixture on a chosen day, with expected goals and the Over/Under split |
+| `/?day=YYYY-MM-DD` | That day instead. Arrows skip to the next and previous day that has football |
+| `/matches/[id]` | Expected goals, total-goals distribution chart, line table, market comparison, likely scorelines, related headlines |
+| `/performance` | Walk-forward results against four baselines, hit rate over time, calibration |
+
+### The matchday view
+
+The home page opens on the day that matters now: the next day with fixtures, or
+the most recent day with results once the fixture list runs out. Football is not
+played every day, so defaulting to today would usually show an empty page, and
+the arrows jump between days that actually have matches rather than stepping by
+24 hours.
+
+A **past** day shows what the model would have said **before kick-off**. Each
+finished match is refitted on matches that kicked off earlier and nothing else,
+and the card is labelled to say so. Showing the current model against a result
+it has already absorbed would make the page look far better than the model is.
+
+### How current the data is
+
+The page states the age of the stored data and refreshes itself every two
+minutes, which the reader can switch off. What it cannot do is be live: the
+sources publish on their own schedule, so a freshly rendered page can hold data
+that is a day old. The bar says when the last ingest ran rather than implying a
+live feed. For fresher numbers, run the ingest again.
+
+### News
+
+Headlines come from public RSS feeds, three international and four Thai. RSS is
+published for software to read, unlike scraping a page, which breaks on every
+redesign and is generally against a site's terms.
+
+Thai publishers mostly offer a combined sport feed, so those items are filtered
+by football keywords before being shown.
+
+**No headline reaches the model.** There is no defined path from "the striker is
+a doubt" to a number of expected goals, and inventing one would produce output
+nobody could check. The backtest already shows the model has no edge over a
+league average; an unvalidated adjustment would make it worse and unmeasurable.
+Headlines sit beside the analysis as context for the reader, and the panel says
+so. If injuries are to inform the model, the route is structured injury data
+plus an adjustment whose value the backtest demonstrates.
 
 Dark dashboard theme. The chart colours are a validated set: Over is warm, Under
 is cool, every adjacent pair clears the colour-vision-deficiency separation
@@ -313,7 +360,7 @@ nothing depends on hue alone. Every page carries the disclaimer.
 
 ```bash
 cd backend
-pytest              # 162 tests
+pytest              # 215 tests
 pytest --cov=app    # with coverage
 ```
 
@@ -454,6 +501,50 @@ python -m scripts.run_backtest --compare-shrinkage
 
 ---
 
+## Google Sheets
+
+Two routes, depending on whether the API is reachable from the internet.
+
+**Download and import.** Every table is available as CSV:
+
+| Table | Contents |
+| --- | --- |
+| `matches` | Every match, its result and the stored market prices |
+| `predictions` | Each stored forecast beside the result it was scored against |
+| `backtest` | One row per out-of-sample match from a walk-forward run |
+| `team_stats` | Per-team aggregates and fitted strengths |
+
+```
+http://localhost:8000/api/export/backtest.csv
+```
+
+Then File, Import in Sheets. `backtest` is the one worth analysing: one row per
+match the model had never seen, with what it said and what happened.
+
+**Write to the sheet directly.** `scripts/export_to_sheets.py` writes each table
+to its own worksheet tab, so a chart or pivot built on a tab keeps working after
+the next run. It needs a Google service account:
+
+1. In Google Cloud, create a project and enable the Google Sheets API.
+2. Create a service account and download its JSON key.
+3. Share the spreadsheet as **Editor** with the service account's
+   `...@....iam.gserviceaccount.com` address. Skipping this is the usual cause
+   of a 403: the service account is a separate identity from your own account.
+4. Set `GOOGLE_SERVICE_ACCOUNT_FILE` and `GOOGLE_SHEET_ID` in `backend/.env`,
+   keeping the key file outside the repository.
+
+```bash
+pip install gspread google-auth
+python -m scripts.export_to_sheets --dry-run   # check the tables first
+python -m scripts.export_to_sheets
+```
+
+A formula such as `=IMPORTDATA("https://host/api/export/backtest.csv")` also
+works, but only once the API is published: Google's servers fetch that URL, so
+they cannot reach a server on your own machine.
+
+---
+
 ## Migrations
 
 Tables are created automatically when `ENVIRONMENT=development`. For anything
@@ -478,7 +569,9 @@ backend/
       backtest.py         # walk-forward engine, baselines, scoring
       odds.py             # implied probability, vig removal, edge, Kelly
       stats_builder.py    # team_stats aggregation
+    exporters.py          # flat tables for CSV and Google Sheets
     pipeline/
+      news.py             # RSS reader, never model input
       providers/          # football-data.co.uk CSV, football-data.org, API-Football
       etl.py              # idempotent upserts
       run_ingest.py       # CLI entry point for cron
@@ -491,6 +584,7 @@ backend/
   scripts/
     seed_demo.py          # simulated data, no API key needed
     run_backtest.py       # walk-forward backtest CLI
+    export_to_sheets.py   # write the tables into a Google Sheet
     ingest_cron.sh        # Linux and macOS schedule
     ingest_task.ps1       # Windows schedule
   tests/
@@ -523,5 +617,6 @@ Worth knowing before reading anything into the output:
   reports how many matches a fit used, and the UI shows it.
 - **No closing line.** Without stored market prices there is no way to tell
   whether an edge was real or the model simply disagreed with a sharper number.
-#   f o o t b a l l  
+#   f o o t b a l l 
+ 
  

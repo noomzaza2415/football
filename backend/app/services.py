@@ -6,7 +6,7 @@ and the pure analytics dataclasses lives here.
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Iterable, Sequence
 
 import numpy as np
@@ -302,11 +302,34 @@ def serialize_prediction(
     )
 
 
+def _actual_fields(match: Match, lean: str | None) -> dict:
+    """Result fields for a match that has already been played."""
+    total = match.total_goals
+    if total is None:
+        return {}
+
+    actual = "OVER" if total > 2.5 else "UNDER"
+    correct: bool | None = None
+    if lean in {"OVER", "UNDER"}:
+        correct = lean == actual
+
+    return {
+        "actual_total_goals": total,
+        "actual_result": actual,
+        "model_correct": correct,
+    }
+
+
 def summarize_match(
-    db: Session, match: Match, prediction: MatchPrediction | None, sample_matches: int
+    db: Session,
+    match: Match,
+    prediction: MatchPrediction | None,
+    sample_matches: int,
+    *,
+    point_in_time: bool = False,
 ) -> MatchSummaryOut:
     if prediction is None:
-        return MatchSummaryOut(match=match)
+        return MatchSummaryOut(match=match, **_actual_fields(match, None))
 
     entry = prediction.lines.get(2.5)
     edge: float | None = None
@@ -315,14 +338,17 @@ def summarize_match(
         if item.selection == "OVER" and item.line == 2.5:
             edge = item.edge
 
+    lean = lean_at_line(prediction, 2.5)
     return MatchSummaryOut(
         match=match,
         expected_total_goals=prediction.expected_total_goals,
         prob_over_2_5=entry.prob_over if entry else None,
         prob_under_2_5=entry.prob_under if entry else None,
-        lean=lean_at_line(prediction, 2.5),
+        lean=lean,
         edge_over_2_5=edge,
         model_version=prediction.model_version,
+        point_in_time=point_in_time,
+        **_actual_fields(match, lean),
     )
 
 
@@ -374,6 +400,189 @@ def upcoming_matches(
     if league:
         stmt = stmt.where(Match.league == league)
     return list(db.execute(stmt).scalars().all())
+
+
+def matches_between(
+    db: Session,
+    start: datetime,
+    end: datetime,
+    *,
+    league: str | None = None,
+    status: MatchStatus | None = None,
+    limit: int = 200,
+) -> list[Match]:
+    """Every match kicking off inside a half-open window, earliest first."""
+    stmt = (
+        select(Match)
+        .options(selectinload(Match.home_team), selectinload(Match.away_team))
+        .where(Match.match_date >= start, Match.match_date < end)
+        .order_by(Match.match_date.asc(), Match.id.asc())
+        .limit(limit)
+    )
+    if league:
+        stmt = stmt.where(Match.league == league)
+    if status is not None:
+        stmt = stmt.where(Match.status == status)
+    return list(db.execute(stmt).scalars().all())
+
+
+def match_day_counts(
+    db: Session,
+    *,
+    league: str | None = None,
+    start: datetime | None = None,
+    end: datetime | None = None,
+) -> list[dict]:
+    """Matches per calendar day, so the date picker only offers real days.
+
+    The day is derived in Python rather than in SQL because truncating a
+    timestamp is spelled differently in PostgreSQL and in the SQLite used by
+    the tests, and the row count here is small enough not to matter.
+    """
+    stmt = select(Match.match_date, Match.status).order_by(Match.match_date.asc())
+    if league:
+        stmt = stmt.where(Match.league == league)
+    if start is not None:
+        stmt = stmt.where(Match.match_date >= start)
+    if end is not None:
+        stmt = stmt.where(Match.match_date < end)
+
+    buckets: dict[str, dict[str, int]] = {}
+    for kickoff, status in db.execute(stmt).all():
+        bucket = buckets.setdefault(
+            kickoff.date().isoformat(), {"total": 0, "scheduled": 0, "finished": 0}
+        )
+        bucket["total"] += 1
+        if status == MatchStatus.FINISHED:
+            bucket["finished"] += 1
+        elif status == MatchStatus.SCHEDULED:
+            bucket["scheduled"] += 1
+
+    return [{"date": day, **counts} for day, counts in sorted(buckets.items())]
+
+
+def nearest_match_day(db: Session, *, league: str | None = None) -> date | None:
+    """The most useful day to open the dashboard on.
+
+    Football is not played every day, so defaulting to today usually shows an
+    empty page. This picks the next day with fixtures, and falls back to the
+    most recent day that had results once the fixture list runs out.
+    """
+    now = datetime.now(timezone.utc)
+
+    base = select(Match.match_date)
+    if league:
+        base = base.where(Match.league == league)
+
+    # A match that kicked off in the last three hours still counts as today.
+    upcoming = db.execute(
+        base.where(Match.match_date >= now - timedelta(hours=3))
+        .order_by(Match.match_date.asc())
+        .limit(1)
+    ).scalar_one_or_none()
+    if upcoming is not None:
+        return upcoming.date()
+
+    latest = db.execute(
+        base.order_by(Match.match_date.desc()).limit(1)
+    ).scalar_one_or_none()
+    return latest.date() if latest is not None else None
+
+
+def data_freshness(db: Session) -> dict:
+    """When the stored data last changed, so the UI can state its own staleness."""
+    now = datetime.now(timezone.utc)
+    return {
+        "last_ingest_at": db.execute(
+            select(func.max(Match.updated_at))
+        ).scalar_one_or_none(),
+        "latest_result_at": db.execute(
+            select(func.max(Match.match_date)).where(Match.status == MatchStatus.FINISHED)
+        ).scalar_one_or_none(),
+        "next_kickoff_at": db.execute(
+            select(func.min(Match.match_date)).where(
+                Match.status == MatchStatus.SCHEDULED, Match.match_date >= now
+            )
+        ).scalar_one_or_none(),
+        "server_time": now,
+    }
+
+
+def summarize_many(
+    db: Session,
+    matches: Sequence[Match],
+    *,
+    include_prediction: bool = True,
+) -> list[MatchSummaryOut]:
+    """Summarise a day of matches, refitting honestly for the ones already played.
+
+    A finished match has to be predicted from what was known before kick-off,
+    or the card would show a model that had already seen the result. The
+    history is loaded once per league and sliced per match rather than
+    re-queried, because a busy Saturday holds a dozen fixtures.
+    """
+    if not matches:
+        return []
+    if not include_prediction:
+        return [summarize_match(db, match, None, 0) for match in matches]
+
+    histories: dict[str, list[tuple[datetime, MatchResult]]] = {}
+
+    def history_for(league: str) -> list[tuple[datetime, MatchResult]]:
+        if league not in histories:
+            rows = db.execute(finished_matches_query(league)).scalars().all()
+            if len(rows) < 20:
+                # Fall back to every league so a thin database still works.
+                rows = db.execute(finished_matches_query()).scalars().all()
+            histories[league] = [
+                (
+                    row.match_date,
+                    MatchResult(
+                        home_team_id=row.home_team_id,
+                        away_team_id=row.away_team_id,
+                        home_goals=int(row.home_goals),
+                        away_goals=int(row.away_goals),
+                    ),
+                )
+                for row in rows
+            ]
+        return histories[league]
+
+    summaries: list[MatchSummaryOut] = []
+    for match in matches:
+        history = history_for(match.league)
+        played = match.is_finished
+
+        usable = [
+            result
+            for kickoff, result in history
+            if not played or kickoff < match.match_date
+        ]
+        if not usable:
+            summaries.append(summarize_match(db, match, None, 0))
+            continue
+
+        league_averages = compute_league_averages(usable)
+        strengths = compute_team_strengths(
+            usable,
+            league_averages,
+            last_n=settings.model_last_n_matches,
+            shrinkage=settings.shrinkage,
+        )
+        prediction = predict_match(
+            match.home_team_id,
+            match.away_team_id,
+            strengths,
+            league_averages,
+            lines=settings.line_list or DEFAULT_LINES,
+            max_goals=settings.model_max_goals,
+            rho=settings.model_rho,
+        )
+        summaries.append(
+            summarize_match(db, match, prediction, len(usable), point_in_time=played)
+        )
+
+    return summaries
 
 
 def rebuild_team_stats(db: Session, league: str | None = None) -> int:

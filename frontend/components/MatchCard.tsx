@@ -9,6 +9,7 @@ export default function MatchCard({ summary }: { summary: MatchSummary }) {
   const lean = leanStyles(summary.lean);
   const hasModel = summary.prob_over_2_5 !== null;
   const overShare = (summary.prob_over_2_5 ?? 0) * 100;
+  const played = summary.actual_total_goals !== null;
 
   return (
     <Link
@@ -29,34 +30,62 @@ export default function MatchCard({ summary }: { summary: MatchSummary }) {
         </Badge>
       </div>
 
-      <div className="space-y-1">
-        <p className="truncate text-base font-semibold tracking-tight text-ink">
-          {match.home_team.name}
-        </p>
-        <p className="truncate text-base font-semibold tracking-tight text-ink">
-          {match.away_team.name}
-        </p>
-      </div>
+      {/* A finished match leads with the score; an upcoming one has none. */}
+      {played ? (
+        <div className="space-y-1">
+          <div className="flex items-baseline justify-between gap-3">
+            <p className="min-w-0 truncate text-base font-semibold tracking-tight text-ink">
+              {match.home_team.name}
+            </p>
+            <p className="text-lg font-semibold text-ink tabular">{match.home_goals}</p>
+          </div>
+          <div className="flex items-baseline justify-between gap-3">
+            <p className="min-w-0 truncate text-base font-semibold tracking-tight text-ink">
+              {match.away_team.name}
+            </p>
+            <p className="text-lg font-semibold text-ink tabular">{match.away_goals}</p>
+          </div>
+        </div>
+      ) : (
+        <div className="space-y-1">
+          <p className="truncate text-base font-semibold tracking-tight text-ink">
+            {match.home_team.name}
+          </p>
+          <p className="truncate text-base font-semibold tracking-tight text-ink">
+            {match.away_team.name}
+          </p>
+        </div>
+      )}
 
       {hasModel ? (
         <>
           <div className="flex items-baseline justify-between gap-3">
             <div>
-              <p className="text-xs text-ink-muted">ประตูรวมที่คาด</p>
+              <p className="text-xs text-ink-muted">
+                {played ? "ประตูรวมที่คาดไว้" : "ประตูรวมที่คาด"}
+              </p>
               <p className="text-2xl font-semibold tracking-tight text-ink tabular">
                 {goals(summary.expected_total_goals)}
               </p>
             </div>
             <div className="text-right">
-              <p className="text-xs text-ink-muted">สูง 2.5</p>
-              <p className="text-2xl font-semibold tracking-tight text-series-2 tabular">
-                {percent(summary.prob_over_2_5, 0)}
+              <p className="text-xs text-ink-muted">
+                {played ? "ประตูรวมจริง" : "สูง 2.5"}
+              </p>
+              <p
+                className={`text-2xl font-semibold tracking-tight tabular ${
+                  played ? "text-ink" : "text-series-2"
+                }`}
+              >
+                {played
+                  ? summary.actual_total_goals
+                  : percent(summary.prob_over_2_5, 0)}
               </p>
             </div>
           </div>
 
-          {/* Over on the left, Under on the right, each labelled in the row
-              below so the split does not depend on colour alone. */}
+          {/* Over on the left, Under on the right, each labelled below so the
+              split never depends on colour alone. */}
           <div>
             <div
               className="flex h-2 w-full gap-0.5 overflow-hidden rounded-full"
@@ -75,24 +104,44 @@ export default function MatchCard({ summary }: { summary: MatchSummary }) {
             </div>
           </div>
 
-          {match.market_odds_over !== null && summary.edge_over_2_5 !== null ? (
-            <p className="border-t border-hairline pt-3 text-xs text-ink-muted">
-              ราคาตลาด {match.market_odds_over.toFixed(2)} /{" "}
-              {match.market_odds_under?.toFixed(2)}
-              <span className="mx-1.5 text-baseline">·</span>
-              <span
-                className={
-                  summary.edge_over_2_5 > 0 ? "text-good" : "text-ink-secondary"
-                }
-              >
-                ส่วนต่างฝั่งสูง {signedPercent(summary.edge_over_2_5, 1)}
-              </span>
-            </p>
-          ) : (
-            <p className="border-t border-hairline pt-3 text-xs text-ink-muted">
-              ยังไม่มีราคาตลาดของคู่นี้
-            </p>
-          )}
+          <div className="border-t border-hairline pt-3 text-xs text-ink-muted">
+            {played ? (
+              <p className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                <span>ผลออก {summary.actual_result === "OVER" ? "สูง" : "ต่ำ"}</span>
+                {summary.model_correct === null ? (
+                  <span>โมเดลก้ำกึ่ง ไม่นับ</span>
+                ) : (
+                  <span className={summary.model_correct ? "text-good" : "text-critical"}>
+                    <span aria-hidden="true">{summary.model_correct ? "✓" : "✕"}</span>{" "}
+                    โมเดลทาย{summary.model_correct ? "ถูก" : "ผิด"}
+                  </span>
+                )}
+                {summary.point_in_time ? (
+                  <span
+                    className="rounded bg-surface-raised px-1.5 py-0.5 text-[10px]"
+                    title="ทำนายจากข้อมูลที่มีก่อนเวลาเตะเท่านั้น"
+                  >
+                    ไม่แอบดูผล
+                  </span>
+                ) : null}
+              </p>
+            ) : match.market_odds_over !== null && summary.edge_over_2_5 !== null ? (
+              <p>
+                ราคาตลาด {match.market_odds_over.toFixed(2)} /{" "}
+                {match.market_odds_under?.toFixed(2)}
+                <span className="mx-1.5 text-baseline">·</span>
+                <span
+                  className={
+                    summary.edge_over_2_5 > 0 ? "text-good" : "text-ink-secondary"
+                  }
+                >
+                  ส่วนต่างฝั่งสูง {signedPercent(summary.edge_over_2_5, 1)}
+                </span>
+              </p>
+            ) : (
+              <p>ยังไม่มีราคาตลาดของคู่นี้</p>
+            )}
+          </div>
         </>
       ) : (
         <p className="text-sm text-ink-muted">

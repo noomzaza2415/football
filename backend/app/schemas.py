@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -135,6 +135,31 @@ class DateRangeOut(BaseModel):
     earliest: datetime | None = None
     latest: datetime | None = None
     days: list[MatchDayOut] = Field(default_factory=list)
+
+
+class FreshnessOut(BaseModel):
+    """How current the stored data is.
+
+    The dashboard states this openly rather than implying the numbers are live.
+    The underlying sources publish on their own schedule, so a page can be
+    freshly rendered from data that is a day old.
+    """
+
+    last_ingest_at: datetime | None = None
+    latest_result_at: datetime | None = None
+    next_kickoff_at: datetime | None = None
+    server_time: datetime
+
+
+class MatchDayViewOut(BaseModel):
+    """One calendar day of matches, with links to the neighbouring match days."""
+
+    day: date | None = None
+    matches: list[MatchSummaryOut] = Field(default_factory=list)
+    previous_day: date | None = None
+    next_day: date | None = None
+    freshness: FreshnessOut
+    disclaimer: str = DISCLAIMER
 
 
 # --------------------------------------------------------------------------- #
@@ -307,6 +332,42 @@ class BacktestOut(BaseModel):
 
     records: list[BacktestRecordOut] = Field(default_factory=list)
     disclaimer: str = DISCLAIMER
+
+
+# --------------------------------------------------------------------------- #
+# News
+# --------------------------------------------------------------------------- #
+class NewsSourceOut(BaseModel):
+    key: str
+    name: str
+    url: str
+    language: str
+    scope: str
+    topic: str = Field(
+        default="football",
+        description=(
+            "football for a dedicated feed, sport for a combined one whose items "
+            "are filtered by keyword"
+        ),
+    )
+
+
+class NewsItemOut(BaseModel):
+    source: str
+    source_key: str
+    language: str
+    scope: str
+    title: str
+    url: str
+    summary: str | None = None
+    published_at: datetime | None = None
+
+
+class NewsFeedOut(BaseModel):
+    """Headlines plus the note explaining that they are not model input."""
+
+    items: list[NewsItemOut] = Field(default_factory=list)
+    note: str
 
 
 class HealthOut(BaseModel):

@@ -32,6 +32,7 @@ class Settings(BaseSettings):
     db_echo: bool = False
     db_pool_size: int = 5
     db_max_overflow: int = 10
+    db_connect_timeout_seconds: int = 5
 
     # --- external data providers ------------------------------------------
     # "football-data" uses football-data.org, "api-football" uses API-Football
@@ -64,6 +65,17 @@ class Settings(BaseSettings):
     # "auto" derives the constant from the data, "off" uses the raw ratios, a
     # number sets the constant directly in matches.
     model_shrinkage: str = "auto"
+
+    # --- google sheets -----------------------------------------------------
+    # A service account JSON key file, and the long id from the sheet's URL.
+    # The sheet must be shared with the service account's email as Editor.
+    google_service_account_file: str | None = None
+    google_sheet_id: str | None = None
+
+    # --- news --------------------------------------------------------------
+    # Headlines are shown as reading context and never reach the model.
+    news_enabled: bool = True
+    news_cache_seconds: int = 300
 
     # --- api ---------------------------------------------------------------
     api_prefix: str = "/api"

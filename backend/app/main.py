@@ -13,7 +13,7 @@ from app import services
 from app.analytics.poisson_model import MODEL_VERSION
 from app.config import get_settings
 from app.database import get_db, init_db
-from app.routers import matches, predictions, teams
+from app.routers import exports, matches, news, predictions, teams
 from app.schemas import DISCLAIMER, HealthOut
 
 logging.basicConfig(level=logging.INFO)
@@ -54,6 +54,8 @@ app.add_middleware(
 app.include_router(teams.router, prefix=settings.api_prefix)
 app.include_router(matches.router, prefix=settings.api_prefix)
 app.include_router(predictions.router, prefix=settings.api_prefix)
+app.include_router(news.router, prefix=settings.api_prefix)
+app.include_router(exports.router, prefix=settings.api_prefix)
 
 
 @app.get("/", tags=["meta"], summary="Service banner")

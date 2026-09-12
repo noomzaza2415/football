@@ -5,7 +5,10 @@
 
 import type {
   Backtest,
+  DateRange,
   Health,
+  MatchDayView,
+  NewsFeed,
   Match,
   MatchSummary,
   Prediction,
@@ -94,4 +97,27 @@ export const api = {
 
   backtest: (minTrainMatches = 60) =>
     request<Backtest>(`/predictions/backtest?min_train_matches=${minTrainMatches}`),
+
+  /** One calendar day. Omit the day to get whichever day matters most now. */
+  matchDay: (day?: string, league?: string) => {
+    const params = new URLSearchParams();
+    if (day) params.set("day", day);
+    if (league) params.set("league", league);
+    const query = params.toString();
+    return request<MatchDayView>(`/matches/day${query ? `?${query}` : ""}`);
+  },
+
+  calendar: (league?: string) =>
+    request<DateRange>(
+      `/matches/calendar${league ? `?league=${encodeURIComponent(league)}` : ""}`,
+    ),
+
+  news: (limit = 12, language?: string) => {
+    const params = new URLSearchParams({ limit: String(limit) });
+    if (language) params.set("language", language);
+    return request<NewsFeed>(`/news?${params.toString()}`);
+  },
+
+  newsForMatch: (matchId: number, limit = 6) =>
+    request<NewsFeed>(`/news/match/${matchId}?limit=${limit}`),
 };

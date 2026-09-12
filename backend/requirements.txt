@@ -16,6 +16,10 @@ scipy>=1.14,<2.0
 httpx>=0.28,<1.0
 python-dotenv>=1.0,<2.0
 
+# optional: Google Sheets export. Install only if you use it.
+# gspread>=6.1,<7.0
+# google-auth>=2.35,<3.0
+
 # development / test
 pytest>=8.3,<9.0
 pytest-cov>=6.0,<8.0

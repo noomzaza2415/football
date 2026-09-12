@@ -63,6 +63,55 @@ export interface MatchSummary {
   lean: Lean | null;
   edge_over_2_5: number | null;
   model_version: string | null;
+  actual_total_goals: number | null;
+  actual_result: "OVER" | "UNDER" | null;
+  model_correct: boolean | null;
+  point_in_time: boolean;
+}
+
+export interface MatchDay {
+  date: string;
+  total: number;
+  scheduled: number;
+  finished: number;
+}
+
+export interface DateRange {
+  earliest: string | null;
+  latest: string | null;
+  days: MatchDay[];
+}
+
+export interface Freshness {
+  last_ingest_at: string | null;
+  latest_result_at: string | null;
+  next_kickoff_at: string | null;
+  server_time: string;
+}
+
+export interface MatchDayView {
+  day: string | null;
+  matches: MatchSummary[];
+  previous_day: string | null;
+  next_day: string | null;
+  freshness: Freshness;
+  disclaimer: string;
+}
+
+export interface NewsItem {
+  source: string;
+  source_key: string;
+  language: string;
+  scope: string;
+  title: string;
+  url: string;
+  summary: string | null;
+  published_at: string | null;
+}
+
+export interface NewsFeed {
+  items: NewsItem[];
+  note: string;
 }
 
 export interface LineProbability {
