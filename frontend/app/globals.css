@@ -1,0 +1,81 @@
+@import "tailwindcss";
+
+/* Dark-committed dashboard palette.
+ *
+ * The series and status hexes are a validated set: every adjacent pair clears
+ * the colour-vision-deficiency separation floor against the #1a1a19 chart
+ * surface, so Over and Under never rely on hue alone being distinguishable.
+ * Over is warm, Under is cool, and both always ship with a text label. */
+@theme {
+  --color-plane: #0d0d0d;
+  --color-surface: #1a1a19;
+  --color-surface-raised: #232321;
+  --color-hairline: #2c2c2a;
+  --color-baseline: #383835;
+
+  --color-ink: #ffffff;
+  --color-ink-secondary: #c3c2b7;
+  --color-ink-muted: #898781;
+
+  --color-series-1: #3987e5; /* blue   - Under, model */
+  --color-series-2: #d95926; /* orange - Over, market */
+  --color-series-3: #199e70; /* aqua   - third series */
+
+  --color-good: #0ca30c;
+  --color-warning: #fab219;
+  --color-serious: #ec835a;
+  --color-critical: #d03b3b;
+
+  /* Latin glyphs come from the system UI face; Thai glyphs fall through to
+   * whichever Thai face the platform ships (Leelawadee UI on Windows,
+   * Thonburi on macOS, Noto Sans Thai on Android and most Linux). */
+  --font-sans: system-ui, -apple-system, "Segoe UI", "Leelawadee UI",
+    "Noto Sans Thai", Thonburi, Tahoma, sans-serif;
+}
+
+:root {
+  color-scheme: dark;
+}
+
+html,
+body {
+  background-color: var(--color-plane);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Thai needs more room than Latin: tone marks sit above the line and vowel
+ * signs below it, so a tight leading clips them. */
+body {
+  line-height: 1.65;
+}
+
+/* Columns of figures must line up; prose numbers should not. */
+.tabular {
+  font-variant-numeric: tabular-nums;
+}
+
+/* One panel style, used by every card and chart container. */
+.panel {
+  background-color: var(--color-surface);
+  border: 1px solid var(--color-hairline);
+  border-radius: 0.875rem;
+}
+
+.panel-raised {
+  background-color: var(--color-surface-raised);
+  border: 1px solid var(--color-hairline);
+  border-radius: 0.75rem;
+}
+
+/* Recharts injects its own focus outline on the wrapper; suppress it so the
+ * keyboard ring is drawn by the interactive element instead. */
+.recharts-wrapper:focus,
+.recharts-surface:focus {
+  outline: none;
+}
+
+::selection {
+  background-color: color-mix(in oklab, var(--color-series-1) 40%, transparent);
+}

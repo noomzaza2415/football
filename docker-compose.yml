@@ -1,0 +1,29 @@
+# Local PostgreSQL for development. The backend and frontend run on the host;
+# only the database is containerised, which keeps the edit-reload loop fast.
+#
+#   docker compose up -d db
+#
+# Credentials come from the shell environment so nothing secret sits in this
+# file. Copy backend/.env.example to backend/.env and keep the two in step.
+
+services:
+  db:
+    image: postgres:17-alpine
+    container_name: football_ou_db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-football_ou}
+      POSTGRES_USER: ${POSTGRES_USER:-ou_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in your shell or a .env file}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-ou_user} -d ${POSTGRES_DB:-football_ou}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  pgdata:
