@@ -6,9 +6,13 @@
 // stale. What it cannot do is make the data live: the upstream sources publish
 // on their own schedule, so this states the age of the stored data plainly
 // rather than implying a live feed.
+//
+// The countdown is derived from a deadline rather than stored as a counter. A
+// state updater function must be pure, because React may call it during render,
+// so the refresh has to happen in an effect and never inside setState.
 
 import { useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 import type { Freshness } from "@/lib/types";
 
@@ -39,34 +43,45 @@ function clockTime(iso: string | null): string {
 
 export default function FreshnessBar({ freshness }: { freshness: Freshness }) {
   const router = useRouter();
-  const [now, setNow] = useState(() => Date.now());
-  const [countdown, setCountdown] = useState(REFRESH_SECONDS);
+
+  // Seeding the clock from the server's own timestamp keeps the first client
+  // render byte-identical to the server one, so nothing mismatches on hydration.
+  const serverNow = new Date(freshness.server_time).getTime();
+
+  const [now, setNow] = useState(serverNow);
+  const [deadline, setDeadline] = useState(serverNow + REFRESH_SECONDS * 1000);
   const [autoRefresh, setAutoRefresh] = useState(true);
 
+  // One ticking clock, doing nothing but advancing time.
   useEffect(() => {
-    const tick = setInterval(() => {
-      setNow(Date.now());
-      setCountdown((remaining) => {
-        if (!autoRefresh) return REFRESH_SECONDS;
-        if (remaining <= 1) {
-          router.refresh();
-          return REFRESH_SECONDS;
-        }
-        return remaining - 1;
-      });
-    }, 1000);
+    const timer = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, []);
 
-    return () => clearInterval(tick);
-  }, [autoRefresh, router]);
+  // The refresh lives in its own effect, where a side effect is allowed.
+  useEffect(() => {
+    if (!autoRefresh || now < deadline) return;
+
+    setDeadline(Date.now() + REFRESH_SECONDS * 1000);
+    router.refresh();
+  }, [autoRefresh, now, deadline, router]);
+
+  const restartCountdown = useCallback(() => {
+    setDeadline(Date.now() + REFRESH_SECONDS * 1000);
+  }, []);
+
+  const refreshNow = useCallback(() => {
+    restartCountdown();
+    router.refresh();
+  }, [restartCountdown, router]);
+
+  const secondsLeft = Math.max(0, Math.ceil((deadline - now) / 1000));
 
   return (
     <div className="panel flex flex-col gap-3 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
       <div className="flex flex-wrap items-center gap-x-5 gap-y-1 text-xs text-ink-muted">
         <span className="inline-flex items-center gap-1.5">
-          <span
-            aria-hidden="true"
-            className="h-1.5 w-1.5 rounded-full bg-good"
-          />
+          <span aria-hidden="true" className="h-1.5 w-1.5 rounded-full bg-good" />
           ข้อมูลอัปเดต {ageInWords(freshness.last_ingest_at, now)}
         </span>
         <span>ผลล่าสุดในฐานข้อมูล {clockTime(freshness.latest_result_at)}</span>
@@ -80,18 +95,22 @@ export default function FreshnessBar({ freshness }: { freshness: Freshness }) {
           <input
             type="checkbox"
             checked={autoRefresh}
-            onChange={(event) => setAutoRefresh(event.target.checked)}
+            onChange={(event) => {
+              setAutoRefresh(event.target.checked);
+              // Turning it back on should give a full interval, not fire at once.
+              if (event.target.checked) restartCountdown();
+            }}
             className="h-3.5 w-3.5 accent-[var(--color-series-1)]"
           />
           รีเฟรชเอง
           {autoRefresh ? (
-            <span className="text-ink-muted tabular">({countdown} วิ)</span>
+            <span className="text-ink-muted tabular">({secondsLeft} วิ)</span>
           ) : null}
         </label>
 
         <button
           type="button"
-          onClick={() => router.refresh()}
+          onClick={refreshNow}
           className="rounded-lg border border-hairline px-3 py-1.5 text-xs font-medium text-ink-secondary transition-colors hover:border-series-1/40 hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-series-1"
         >
           รีเฟรชเดี๋ยวนี้

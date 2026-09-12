@@ -69,6 +69,12 @@ class Settings(BaseSettings):
     # --- google sheets -----------------------------------------------------
     # A service account JSON key file, and the long id from the sheet's URL.
     # The sheet must be shared with the service account's email as Editor.
+    # Route A, Apps Script: no Google Cloud project needed. A script bound to
+    # the sheet is deployed as a web app and this machine pushes to it.
+    google_apps_script_url: str | None = None
+    google_apps_script_token: str | None = None
+
+    # Route B, service account: needs a Google Cloud project and a key file.
     google_service_account_file: str | None = None
     google_sheet_id: str | None = None
 

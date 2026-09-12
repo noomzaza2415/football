@@ -104,7 +104,9 @@ hardcoded and `.env` is gitignored.
 | `MODEL_LAST_N_MATCHES` | Form window per team, 20 by default |
 | `MODEL_RHO` | Dixon-Coles low-score correction, `0` disables it |
 | `MODEL_SHRINKAGE` | `auto`, `off`, or a constant in matches. Leave on `auto` |
-| `GOOGLE_SERVICE_ACCOUNT_FILE` | Optional. Service account JSON key for the Sheets export |
+| `GOOGLE_APPS_SCRIPT_URL` | Optional. Apps Script web app `/exec` URL for the Sheets push |
+| `GOOGLE_APPS_SCRIPT_TOKEN` | Optional. Must match `SECRET` in `apps-script/Code.gs` |
+| `GOOGLE_SERVICE_ACCOUNT_FILE` | Optional. Service account JSON key, the other Sheets route |
 | `GOOGLE_SHEET_ID` | Optional. The id from the spreadsheet URL |
 | `MODEL_LINES` | Lines to compute, `1.5,2.5,3.5` by default |
 | `CORS_ORIGINS` | Where the frontend is served from |
@@ -521,27 +523,50 @@ http://localhost:8000/api/export/backtest.csv
 Then File, Import in Sheets. `backtest` is the one worth analysing: one row per
 match the model had never seen, with what it said and what happened.
 
-**Write to the sheet directly.** `scripts/export_to_sheets.py` writes each table
-to its own worksheet tab, so a chart or pivot built on a tab keeps working after
-the next run. It needs a Google service account:
+**Push from Apps Script (recommended).** No Google Cloud project, no service
+account, no key file. A script bound to the sheet is deployed as a web app, and
+this machine pushes to it. Each table lands on its own tab, so a chart or pivot
+built on a tab keeps working after the next run.
 
-1. In Google Cloud, create a project and enable the Google Sheets API.
-2. Create a service account and download its JSON key.
-3. Share the spreadsheet as **Editor** with the service account's
-   `...@....iam.gserviceaccount.com` address. Skipping this is the usual cause
-   of a 403: the service account is a separate identity from your own account.
-4. Set `GOOGLE_SERVICE_ACCOUNT_FILE` and `GOOGLE_SHEET_ID` in `backend/.env`,
-   keeping the key file outside the repository.
+Apps Script runs on Google's servers, which is why it receives rather than
+fetches: it cannot reach a backend on your own machine, and neither can
+`=IMPORTDATA()`. Pushing puts your computer on the outbound side, which works
+with localhost.
+
+1. Open the spreadsheet, then **Extensions, Apps Script**.
+2. Paste [`apps-script/Code.gs`](apps-script/Code.gs) over `Code.gs` and change
+   `SECRET` to something long and random.
+3. Run the `setup` function once from the editor and accept the permission
+   prompt. That is what authorises the script to edit the sheet.
+4. **Deploy, New deployment, Web app** with *Execute as* **Me** and *Who has
+   access* **Anyone**. "Anyone" is required because your machine calls without a
+   Google login, and the secret is what protects the endpoint.
+5. Put the `/exec` URL and the same secret in `backend/.env`:
+
+       GOOGLE_APPS_SCRIPT_URL=https://script.google.com/macros/s/..../exec
+       GOOGLE_APPS_SCRIPT_TOKEN=the-same-secret-as-in-Code.gs
+
+```bash
+python -m scripts.push_to_sheets --ping      # check the deployment answers
+python -m scripts.push_to_sheets --dry-run   # check the tables
+python -m scripts.push_to_sheets
+```
+
+Re-deploy with **Version: New version** after editing the script, or the old
+code keeps serving. An HTML reply instead of JSON means *Who has access* is not
+set to Anyone.
+
+**Or a service account.** `scripts/export_to_sheets.py` does the same job
+through the Sheets API. It needs a Google Cloud project, a service account JSON
+key, and the spreadsheet shared as **Editor** with the service account's
+`...@....iam.gserviceaccount.com` address. Skipping that share is the usual
+cause of a 403, because the service account is a separate identity from your own
+account. Set `GOOGLE_SERVICE_ACCOUNT_FILE` and `GOOGLE_SHEET_ID`, then:
 
 ```bash
 pip install gspread google-auth
-python -m scripts.export_to_sheets --dry-run   # check the tables first
 python -m scripts.export_to_sheets
 ```
-
-A formula such as `=IMPORTDATA("https://host/api/export/backtest.csv")` also
-works, but only once the API is published: Google's servers fetch that URL, so
-they cannot reach a server on your own machine.
 
 ---
 
@@ -584,7 +609,8 @@ backend/
   scripts/
     seed_demo.py          # simulated data, no API key needed
     run_backtest.py       # walk-forward backtest CLI
-    export_to_sheets.py   # write the tables into a Google Sheet
+    push_to_sheets.py     # push the tables to an Apps Script web app
+    export_to_sheets.py   # the same, via a service account
     ingest_cron.sh        # Linux and macOS schedule
     ingest_task.ps1       # Windows schedule
   tests/
@@ -593,6 +619,8 @@ frontend/
   components/
     charts/               # recharts components, shared theme
   lib/                    # typed API client, formatters, types
+apps-script/
+  Code.gs                 # paste into the sheet's Apps Script editor
 docker-compose.yml        # PostgreSQL for development
 ```
 

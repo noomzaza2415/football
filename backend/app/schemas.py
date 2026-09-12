@@ -2,13 +2,32 @@
 
 from __future__ import annotations
 
-from datetime import date, datetime
+from datetime import date, datetime, timezone
+from typing import Annotated
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, PlainSerializer
 
 from app.models import MatchStatus
 
 ORM = ConfigDict(from_attributes=True)
+
+
+def _as_utc_iso(value: datetime) -> str:
+    """Render a timestamp as UTC-aware ISO text.
+
+    Timestamps come back from SQLite without an offset, because SQLite has no
+    timestamp-with-timezone type. Emitting one of those as-is makes a browser
+    read it as local time, which silently shifts every kick-off by the viewer's
+    UTC offset. A naive value is therefore treated as the UTC it already is.
+    """
+    aware = value if value.tzinfo else value.replace(tzinfo=timezone.utc)
+    return aware.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+#: Use this instead of ``datetime`` on every response field.
+UtcDateTime = Annotated[
+    datetime, PlainSerializer(_as_utc_iso, return_type=str, when_used="unless-none")
+]
 
 # Shown to end users, so it is written in the interface language (Thai).
 DISCLAIMER = (
@@ -53,7 +72,7 @@ class TeamStatsOut(BaseModel):
     defense_strength_home: float
     defense_strength_away: float
     sample_matches: int
-    updated_at: datetime | None = None
+    updated_at: UtcDateTime | None = None
 
 
 class TeamWithStatsOut(BaseModel):
@@ -76,7 +95,7 @@ class MatchOut(BaseModel):
     id: int
     league: str
     season: str | None = None
-    match_date: datetime
+    match_date: UtcDateTime
     status: MatchStatus
     home_team: TeamOut
     away_team: TeamOut
@@ -132,8 +151,8 @@ class MatchDayOut(BaseModel):
 class DateRangeOut(BaseModel):
     """The span of dates the database actually holds."""
 
-    earliest: datetime | None = None
-    latest: datetime | None = None
+    earliest: UtcDateTime | None = None
+    latest: UtcDateTime | None = None
     days: list[MatchDayOut] = Field(default_factory=list)
 
 
@@ -145,10 +164,10 @@ class FreshnessOut(BaseModel):
     freshly rendered from data that is a day old.
     """
 
-    last_ingest_at: datetime | None = None
-    latest_result_at: datetime | None = None
-    next_kickoff_at: datetime | None = None
-    server_time: datetime
+    last_ingest_at: UtcDateTime | None = None
+    latest_result_at: UtcDateTime | None = None
+    next_kickoff_at: UtcDateTime | None = None
+    server_time: UtcDateTime
 
 
 class MatchDayViewOut(BaseModel):
@@ -213,7 +232,7 @@ class PredictionOut(BaseModel):
     market_comparison: list[MarketComparisonOut] = Field(default_factory=list)
     sample_matches: int
     model_version: str
-    created_at: datetime | None = None
+    created_at: UtcDateTime | None = None
     disclaimer: str = DISCLAIMER
 
 
@@ -229,7 +248,7 @@ class RefreshPredictionRequest(BaseModel):
 # --------------------------------------------------------------------------- #
 class PredictionHistoryItem(BaseModel):
     match_id: int
-    match_date: datetime
+    match_date: UtcDateTime
     league: str
     home_team: str
     away_team: str
@@ -242,7 +261,7 @@ class PredictionHistoryItem(BaseModel):
     actual_result: str
     correct: bool
     model_version: str
-    created_at: datetime | None = None
+    created_at: UtcDateTime | None = None
 
 
 class CalibrationBucket(BaseModel):
@@ -289,7 +308,7 @@ class ScoreCardOut(BaseModel):
 
 class BacktestRecordOut(BaseModel):
     match_id: int
-    kickoff: datetime
+    kickoff: UtcDateTime
     league: str
     home_team: str
     away_team: str
@@ -360,7 +379,7 @@ class NewsItemOut(BaseModel):
     title: str
     url: str
     summary: str | None = None
-    published_at: datetime | None = None
+    published_at: UtcDateTime | None = None
 
 
 class NewsFeedOut(BaseModel):
